@@ -118,3 +118,4 @@ export const RAW_PATH_POIS: PathPOI[] = [
   { id: "150-york", name: "150 York", grid: "D5", category: "Y" },
   { id: "yonge-richmond-centre", name: "Yonge Richmond Centre", grid: "G5", category: "Y" },
 ];
+      
