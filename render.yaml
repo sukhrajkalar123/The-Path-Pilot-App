@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: path-pilot-proxy
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run server
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_VISION_MODEL
+        value: gpt-4o-mini
+      - key: PROXY_SHARED_SECRET
+        generateValue: true

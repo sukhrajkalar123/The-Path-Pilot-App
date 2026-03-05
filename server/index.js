@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const OPENAI_VISION_MODEL = process.env.OPENAI_VISION_MODEL || "gpt-4o-mini";
+const PROXY_SHARED_SECRET = (process.env.PROXY_SHARED_SECRET || "").trim();
 
 const MAX_BODY = 25 * 1024 * 1024;
 
@@ -26,7 +27,32 @@ function getLanIp() {
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Proxy-Secret"
+  );
+}
+
+function isAuthorized(req) {
+  if (!PROXY_SHARED_SECRET) return true;
+
+  const fromSecretHeader = req.headers["x-proxy-secret"];
+  const secretHeaderValue = Array.isArray(fromSecretHeader)
+    ? fromSecretHeader[0]
+    : fromSecretHeader;
+  if (typeof secretHeaderValue === "string" && secretHeaderValue === PROXY_SHARED_SECRET) {
+    return true;
+  }
+
+  const fromAuthHeader = req.headers.authorization;
+  const authHeaderValue = Array.isArray(fromAuthHeader)
+    ? fromAuthHeader[0]
+    : fromAuthHeader;
+  if (typeof authHeaderValue !== "string") return false;
+
+  const prefix = "Bearer ";
+  if (!authHeaderValue.startsWith(prefix)) return false;
+  return authHeaderValue.slice(prefix.length).trim() === PROXY_SHARED_SECRET;
 }
 
 function readJson(req) {
@@ -81,12 +107,18 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, authEnabled: Boolean(PROXY_SHARED_SECRET) }));
     return;
   }
 
   if (req.url === "/vision" && req.method === "POST") {
     try {
+      if (!isAuthorized(req)) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+
       if (!OPENAI_API_KEY) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Missing OPENAI_API_KEY" }));
@@ -167,4 +199,9 @@ server.listen(PORT, "0.0.0.0", () => {
   const host = getLanIp();
   console.log(`Vision proxy listening on http://localhost:${PORT}`);
   console.log(`LAN access: http://${host}:${PORT}`);
+  if (PROXY_SHARED_SECRET) {
+    console.log("Proxy auth enabled (X-Proxy-Secret / Bearer token required).");
+  } else {
+    console.log("Proxy auth disabled (set PROXY_SHARED_SECRET to secure public deployments).");
+  }
 });

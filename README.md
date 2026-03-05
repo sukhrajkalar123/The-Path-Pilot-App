@@ -1,50 +1,77 @@
-# Welcome to your Expo app 👋
+# The PATH Pilot
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo app for PATH navigation, with an AI-powered "I'm Lost" flow backed by a Node proxy.
 
-## Get started
+## Local development
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+1. Install dependencies:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+2. Create env file:
 
-## Learn more
+```bash
+cp .env.example .env
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+3. Set at least:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- `OPENAI_API_KEY`
 
-## Join the community
+4. Start app + proxy together:
 
-Join our community of developers creating universal apps.
+```bash
+npm run dev
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+This starts:
+
+- Expo app (`npm run start`)
+- Vision proxy (`npm run server`)
+
+## Use the app anywhere (not just on your home Wi-Fi)
+
+Run the proxy on a public HTTPS URL, then point the app to it.
+
+### Option A: Render (template included)
+
+1. Create a new Render Blueprint service from this repo (`render.yaml` is included).
+2. Set env vars in Render:
+- `OPENAI_API_KEY` (required)
+- `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+- `OPENAI_VISION_MODEL` (default: `gpt-4o-mini`)
+- `PROXY_SHARED_SECRET` (required for public deployment security)
+3. Copy your Render service URL (example: `https://path-pilot-proxy.onrender.com`).
+4. In local `.env` for Expo, set:
+- `EXPO_PUBLIC_API_BASE_URL=https://path-pilot-proxy.onrender.com`
+- `EXPO_PUBLIC_PROXY_SHARED_SECRET=<same value as PROXY_SHARED_SECRET>`
+5. Restart Expo with cache clear:
+
+```bash
+npx expo start -c
+```
+
+Now the app can call the proxy from any network.
+
+## Environment variables
+
+Server:
+
+- `PORT` optional, defaults to `8787`
+- `OPENAI_API_KEY` required
+- `OPENAI_BASE_URL` optional
+- `OPENAI_VISION_MODEL` optional
+- `PROXY_SHARED_SECRET` optional but strongly recommended for public URLs
+
+Expo app:
+
+- `EXPO_PUBLIC_API_BASE_URL` optional. If unset, the app tries local dev host detection.
+- `EXPO_PUBLIC_PROXY_SHARED_SECRET` optional. Should match `PROXY_SHARED_SECRET` when auth is enabled.
+
+## Security notes
+
+- Never put `OPENAI_API_KEY` in client code or Expo public env vars.
+- If the key was ever exposed, rotate it immediately.
+- Keep `PROXY_SHARED_SECRET` set when proxy is publicly reachable.

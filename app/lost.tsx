@@ -27,6 +27,8 @@ type AiResult = {
 };
 
 const norm = (s: string) => s.trim().toLowerCase();
+const EXPLICIT_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+const PROXY_SHARED_SECRET = process.env.EXPO_PUBLIC_PROXY_SHARED_SECRET;
 
 function getDevServerHost() {
   const fromExpoConfig = Constants.expoConfig?.hostUri;
@@ -38,12 +40,39 @@ function getDevServerHost() {
   return cleaned.split(":")[0];
 }
 
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-  (() => {
-    const host = getDevServerHost();
-    return host ? `http://${host}:8787` : "http://localhost:8787";
-  })();
+function normalizeBaseUrl(value?: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function getProxyAuthHeaders() {
+  const secret = PROXY_SHARED_SECRET?.trim();
+  return secret ? { "X-Proxy-Secret": secret } : {};
+}
+
+function getApiBaseCandidates() {
+  const candidates: string[] = [];
+
+  const explicit = normalizeBaseUrl(EXPLICIT_API_BASE_URL);
+  if (explicit) candidates.push(explicit);
+
+  const host = getDevServerHost();
+  const devHostUrl = normalizeBaseUrl(host ? `http://${host}:8787` : null);
+  if (devHostUrl) candidates.push(devHostUrl);
+
+  // Useful for local emulators where localhost resolves to the dev machine.
+  if (__DEV__) {
+    const localhostUrl = normalizeBaseUrl("http://localhost:8787");
+    if (localhostUrl) candidates.push(localhostUrl);
+  }
+
+  return [...new Set(candidates)];
+}
+
+const API_BASE_CANDIDATES = getApiBaseCandidates();
+let cachedApiBaseUrl: string | null = null;
 
 function filterPois(poiNames: string[], query: string, limit = 8): string[] {
   const q = norm(query);
@@ -106,15 +135,35 @@ async function prepareImage(
 
 async function checkProxyHealth(baseUrl: string) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+    const res = await fetch(`${baseUrl}/health`, {
+      headers: getProxyAuthHeaders(),
+      signal: controller.signal,
+    });
     clearTimeout(timeoutId);
     return res.ok;
   } catch {
     clearTimeout(timeoutId);
     return false;
   }
+}
+
+async function resolveApiBaseUrl() {
+  if (cachedApiBaseUrl) {
+    const stillHealthy = await checkProxyHealth(cachedApiBaseUrl);
+    if (stillHealthy) return cachedApiBaseUrl;
+    cachedApiBaseUrl = null;
+  }
+
+  for (const baseUrl of API_BASE_CANDIDATES) {
+    if (await checkProxyHealth(baseUrl)) {
+      cachedApiBaseUrl = baseUrl;
+      return baseUrl;
+    }
+  }
+
+  return null;
 }
 
 function Chip({
@@ -176,8 +225,10 @@ export default function LostScreen() {
     return !!resolvedTo && !!resolvedFrom;
   }, [toName, toQuery, fromName, aiResult, resolvePoi]);
   const networkHint =
-    (aiError?.includes("Network request failed") || aiError?.includes("timed out")) &&
-    "Make sure the proxy is running and EXPO_PUBLIC_API_BASE_URL points to your computer’s LAN IP (not localhost).";
+    (aiError?.includes("Network request failed") ||
+      aiError?.includes("timed out") ||
+      aiError?.includes("Can't reach the proxy")) &&
+    "Set EXPO_PUBLIC_API_BASE_URL to your public proxy URL for anywhere access, or run the local proxy on the same network.";
 
   async function addFromLibrary() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -230,11 +281,12 @@ export default function LostScreen() {
     setAiError(null);
 
     try {
-      const proxyOk = await checkProxyHealth(API_BASE_URL);
-      if (!proxyOk) {
-        setAiError(
-          "Can’t reach the proxy. Make sure it’s running and your phone can access your Mac on the same Wi‑Fi."
-        );
+      const apiBaseUrl = await resolveApiBaseUrl();
+      if (!apiBaseUrl) {
+        const tried = API_BASE_CANDIDATES.length
+          ? ` Tried: ${API_BASE_CANDIDATES.join(", ")}.`
+          : "";
+        setAiError(`Can't reach the proxy.${tried}`);
         return;
       }
 
@@ -242,10 +294,11 @@ export default function LostScreen() {
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch(`${API_BASE_URL}/vision`, {
+      const response = await fetch(`${apiBaseUrl}/vision`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getProxyAuthHeaders(),
         },
         body: JSON.stringify({
           images: dataUrls,
